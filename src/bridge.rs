@@ -100,6 +100,7 @@ decl_storage! {
         /// List of all withdraw requests on Edgeware taken to be the unique hash created
         /// on Edgeware with the user's account, quantity, and nonce
         pub Withdraws get(withdraws): Vec<T::Hash>;
+        /// Mapping of withdraw record hashes to the record
         pub WithdrawOf get(withdraw_of): map T::Hash => (WithdrawIndex, T::AccountId, T::Balance, Vec<Signature>);
         /// Nonce for creating unique hashes per user per withdraw request
         pub WithdrawNonceOf get(withdraw_nonce_of): map T::AccountId => u32;
