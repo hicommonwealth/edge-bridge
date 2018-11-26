@@ -40,7 +40,7 @@ extern crate srml_democracy as democracy;
 use democracy::{Approved, VoteThreshold};
 
 use primitives::ed25519::Signature;
-use runtime_primitives::traits::{Zero, As};
+use runtime_primitives::traits::{Zero, As, Hash};
 
 use runtime_primitives::traits::{MaybeSerializeDebug};
 use rstd::prelude::*;
@@ -68,11 +68,38 @@ decl_module! {
         /// on the eligible blockchain that has an established two-way peg with Edgeware.
         /// This function can be triggered by the depositor or any bridge authority that
         /// sees the transaction first.
-        pub fn deposit(origin, target: T::AccountId, tx_hash: T::Hash, quantity: T::Balance) -> Result {
+        pub fn deposit(origin, target: T::AccountId, transaction_hash: T::Hash, quantity: T::Balance) -> Result {
             let _sender = ensure_signed(origin)?;
             
             // Match on deposit records by the respective transaction hash on the eligible blockchain
-            match <DepositOf<T>>::get(tx_hash) {
+            match <DepositOf<T>>::get(transaction_hash) {
+                Some(_) => { return Err("Deposit should not exist")},
+                None => {
+                    // Create new deposit record
+                    let index = Self::deposit_count();
+                    <DepositCount<T>>::mutate(|i| *i += 1);
+
+                    // If sender is a bridge authority add them to the set of signers
+                    let mut signers = vec![];
+                    if <Authorities<T>>::get().iter().any(|a| a == &_sender) {
+                        signers.push(_sender);
+                    }
+
+                    // Deposit record and send event
+                    <DepositOf<T>>::insert(transaction_hash, (index, target, quantity, signers))
+                    // TODO: Fire event
+                },
+            }
+
+            Ok(())
+        }
+
+        /// The sign_deposit function should compile signatures (from send tx) and
+        /// check if a deposit proposal ever passes with each new valid signer.
+        pub fn sign_deposit(origin, target: T::AccountId, transaction_hash: T::Hash, quantity: T::Balance) -> Result {
+            let _sender = ensure_signed(origin)?;
+
+            match <DepositOf<T>>::get(transaction_hash) {
                 Some((inx, tgt, qty, signers)) => {
                     // Ensure all parameters match for safety
                     ensure!(tgt == target.clone(), "Accounts do not match");
@@ -84,7 +111,7 @@ decl_module! {
                     // Add record update with new signer
                     let mut new_signers = signers;
                     new_signers.push(_sender);
-                    <DepositOf<T>>::insert(tx_hash, (inx, tgt.clone(), qty, new_signers.clone()));
+                    <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone()));
 
                     // Check if we have reached enough signers for the deposit
                     let stake_sum = new_signers.iter()
@@ -97,27 +124,89 @@ decl_module! {
                         <balances::Module<T>>::increase_free_balance_creating(&tgt, qty);
                     }
                 },
-                None => {
-                    let index = Self::deposit_count();
-                    <DepositCount<T>>::mutate(|i| *i += 1);
-                    let mut signers = vec![];
-                    if <Authorities<T>>::get().iter().any(|a| a == &_sender) {
-                        signers.push(_sender);
-                    }
-
-                    <DepositOf<T>>::insert(tx_hash, (index, target, quantity, signers))
-                },
+                None => { return Err("Invalid transaction hash") },
             }
 
             Ok(())
         }
 
+
         /// The withdraw function should precede (in order) a withdraw transaction on the
         /// eligible blockchain that has an established two-way peg with Edgeware. This
         /// function should only be called by a token holder interested in transferring
         /// native Edgeware tokens with Edgeware-compliant, non-native tokens like ERC20.
-        pub fn withdraw(origin, target: T::AccountId, quantity: T::Balance) -> Result {
-            unimplemented!()
+        pub fn withdraw(origin, quantity: T::Balance) -> Result {
+            let _sender = ensure_signed(origin)?;
+
+            let mut nonce = Self::withdraw_nonce_of(_sender.clone());
+            let key = T::Hashing::hash_of(&(nonce, _sender.clone(), quantity));
+
+            match <WithdrawOf<T>>::get(key) {
+                Some(_) => { return Err("Withdraw already exists")},
+                None => {
+                    // Create new withdraw record
+                    let index = Self::withdraw_count();
+                    <WithdrawCount<T>>::mutate(|i| *i += 1);
+
+                    // If sender is a bridge authority add them to the set of signers
+                    let mut signers = vec![];
+                    if <Authorities<T>>::get().iter().any(|a| a == &_sender) {
+                        signers.push(_sender.clone());
+                    }
+
+                    // Ensure sender has enough balance to withdraw from
+                    ensure!(<balances::Module<T>>::total_balance(&_sender) >= quantity, "Invalid balance for withdraw");
+
+                    // Withdraw record and send event
+                    <WithdrawOf<T>>::insert(key, (index, _sender.clone(), quantity, signers));
+                    // TODO: Fire event
+                },
+            }
+
+            nonce += 1;
+            <WithdrawNonceOf<T>>::insert(_sender, nonce);
+            Ok(())
+        }
+
+        /// The sign_withdraw function should compile signatures (from send tx) and
+        /// check if a withdraw proposal ever passes with each new valid signer.
+        pub fn sign_withdraw(origin, target: T::AccountId, record_hash: T::Hash, quantity: T::Balance) -> Result {
+            let _sender = ensure_signed(origin)?;
+
+            match <DepositOf<T>>::get(record_hash) {
+                Some((inx, tgt, qty, signers)) => {
+                    // Ensure all parameters match for safety
+                    ensure!(tgt == target.clone(), "Accounts do not match");
+                    ensure!(qty == quantity, "Quantities don't match");
+                    // Ensure sender is a bridge authority if record exists
+                    ensure!(Self::authorities().iter().any(|id| id == &_sender), "Invalid non-authority sender");
+                    // Ensure senders can't sign twice
+                    ensure!(!signers.iter().any(|id| id == &_sender), "Invalid duplicate deposit signings");
+                    // Add record update with new signer
+                    let mut new_signers = signers;
+                    new_signers.push(_sender);
+                    <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone()));
+
+                    // Check if we have reached enough signers for the deposit
+                    let stake_sum = new_signers.iter()
+                        .map(|s| <AuthorityStake<T>>::get(s))
+                        .fold(Zero::zero(), |a,b| a + b);
+
+                    // Check if we approve the proposal
+                    let total_issuance = <balances::Module<T>>::total_issuance();
+                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, Zero::zero(), total_issuance) {
+                        match <balances::Module<T>>::decrease_free_balance(&tgt, qty) {
+                            Ok(_) => {
+                                // TODO: fire event
+                            },
+                            Err(err) => { return Err(err); }
+                        };
+                    }
+                },
+                None => { return Err("Invalid transaction hash") },
+            }
+
+            Ok(())
         }
     }
 }
