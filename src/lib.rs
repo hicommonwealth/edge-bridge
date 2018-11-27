@@ -47,9 +47,9 @@ extern crate srml_council as council;
 
 use council::{voting, motions, seats};
 
-use rstd::prelude::*;
-use runtime_support::dispatch::Result;
-use primitives::ed25519;
+// use rstd::prelude::*;
+// use runtime_support::dispatch::Result;
+// use primitives::ed25519;
 
 pub mod bridge;
 use bridge::{Module, Trait, RawEvent};
@@ -59,9 +59,9 @@ use bridge::{Module, Trait, RawEvent};
 mod tests {
     use super::*;
 
-    use system::{EventRecord, Phase};
-    use runtime_io::with_externalities;
-    use runtime_io::ed25519::Pair;
+    // use system::{EventRecord, Phase};
+    // use runtime_io::with_externalities;
+    // use runtime_io::ed25519::Pair;
     use primitives::{H256, Blake2Hasher, Hasher};
     // The testing primitives are very useful for avoiding having to work with signatures
     // or public keys. `u64` is used as the `AccountId` and no `Signature`s are requried.
@@ -72,7 +72,7 @@ mod tests {
 
     impl_outer_origin! {
         pub enum Origin for Test {
-            motions
+            // motions
         }
     }
 
@@ -80,17 +80,17 @@ mod tests {
         pub enum Event for Test {
             bridge<T>,
             balances<T>,
-            democracy<T>,
-            council<T>,
-            voting<T>,
-            motions<T>,
+            // democracy<T>,
+            // council<T>,
+            // voting<T>,
+            // motions<T>,
         }
     }
 
     impl_outer_dispatch! {
         pub enum Call for Test where origin: Origin {
             balances::Balances,
-            democracy::Democracy,
+            // democracy::Democracy,
         }
     }
 
@@ -118,21 +118,22 @@ mod tests {
         type EnsureAccountLiquid = ();
         type Event = Event;
     }
-    impl democracy::Trait for Test {
-        type Proposal = Call;
-        type Event = Event;
-    }
-    impl council::Trait for Test {
-        type Event = Event;
-    }
-    impl voting::Trait for Test {
-        type Event = Event;
-    }
-    impl motions::Trait for Test {
-        type Origin = Origin;
-        type Proposal = Call;
-        type Event = Event;
-    }
+    
+    // impl democracy::Trait for Test {
+    //     type Proposal = Call;
+    //     type Event = Event;
+    // }
+    // impl council::Trait for Test {
+    //     type Event = Event;
+    // }
+    // impl voting::Trait for Test {
+    //     type Event = Event;
+    // }
+    // impl motions::Trait for Test {
+    //     type Origin = Origin;
+    //     type Proposal = Call;
+    //     type Event = Event;
+    // }
 
     impl Trait for Test {
             type Event = Event;
@@ -140,10 +141,11 @@ mod tests {
 
     pub type System = system::Module<Test>;
     pub type Balances = balances::Module<Test>;
-    pub type Democracy = democracy::Module<Test>;
-    pub type Council = seats::Module<Test>;
-    pub type CouncilVoting = voting::Module<Test>;
-    pub type CouncilMotions = motions::Module<Test>;
+    // pub type Democracy = democracy::Module<Test>;
+    // pub type Council = seats::Module<Test>;
+    // pub type CouncilVoting = voting::Module<Test>;
+    // pub type CouncilMotions = motions::Module<Test>;
+    pub type Staking = staking::Module<Test>;
     pub type Bridge = Module<Test>;
 
     // This function basically just builds a genesis storage key/value store according to
@@ -151,9 +153,9 @@ mod tests {
     fn new_test_ext() -> sr_io::TestExternalities<Blake2Hasher> {
         let mut t = system::GenesisConfig::<Test>::default().build_storage().unwrap().0;
         // // We use default for brevity, but you can configure as desired if needed.
-        // t.extend(bridge::GenesisConfig::<Test>{
-        //     _genesis_phantom_data: Default::default(),
-        // }.build_storage().unwrap().0);
+        t.extend(bridge::GenesisConfig::<Test>{
+            _genesis_phantom_data: Default::default(),
+        }.build_storage().unwrap().0);
         t.into()
     }
 }

@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with Edgeware.  If not, see <http://www.gnu.org/licenses/>.
 
-#![feature(advanced_slice_patterns, slice_patterns)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "std")]
@@ -36,22 +35,37 @@ extern crate sr_io as runtime_io;
 extern crate srml_balances as balances;
 extern crate srml_system as system;
 extern crate srml_democracy as democracy;
+extern crate srml_session as session;
 
 use democracy::{Approved, VoteThreshold};
 
-use primitives::ed25519::Signature;
-use runtime_primitives::traits::{Zero, As, Hash};
-
-use runtime_primitives::traits::{MaybeSerializeDebug};
 use rstd::prelude::*;
 use system::ensure_signed;
-use runtime_support::{StorageValue, StorageMap, Parameter};
+use runtime_support::{StorageValue, StorageMap};
 use runtime_support::dispatch::Result;
-use primitives::ed25519;
+use runtime_support::storage::unhashed::StorageVec;
+use primitives::storage::well_known_keys;
+use runtime_primitives::traits::{Zero, Hash};
+
+use primitives::traits::{ProvideInherent};
 
 /// Record indices.
 pub type DepositIndex = u32;
 pub type WithdrawIndex = u32;
+
+// struct AuthorityStorageVec<S: codec::Codec + Default>(rstd::marker::PhantomData<S>);
+// impl<S: codec::Codec + Default> StorageVec for AuthorityStorageVec<S> {
+//     type Item = S;
+//     const PREFIX: &'static [u8] = well_known_keys::AUTHORITY_PREFIX;
+// }
+
+// pub trait OnOfflineBridgeAuthority {
+//     fn on_offline_authority(authority_index: usize);
+// }
+
+// impl OnOfflineBridgeAuthority for () {
+//     fn on_offline_authority(_authority_index: usize) {}
+// }
 
 pub trait Trait: balances::Trait {
     /// The overarching event type.
@@ -94,7 +108,7 @@ decl_module! {
             Ok(())
         }
 
-        /// The sign_deposit function should compile signatures (from send tx) and
+        /// The sign_deposit function should compile intentions (from sending tx) and
         /// check if a deposit proposal ever passes with each new valid signer.
         pub fn sign_deposit(origin, target: T::AccountId, transaction_hash: T::Hash, quantity: T::Balance) -> Result {
             let _sender = ensure_signed(origin)?;
@@ -104,10 +118,10 @@ decl_module! {
                     // Ensure all parameters match for safety
                     ensure!(tgt == target.clone(), "Accounts do not match");
                     ensure!(qty == quantity, "Quantities don't match");
-                    // Ensure sender is a bridge authority if record exists
+                    // Ensure sender is a bridge authority
                     ensure!(Self::authorities().iter().any(|id| id == &_sender), "Invalid non-authority sender");
                     // Ensure senders can't sign twice
-                    ensure!(!signers.iter().any(|id| id == &_sender), "Invalid duplicate deposit signings");
+                    ensure!(!signers.iter().any(|id| id == &_sender), "Invalid duplicate signings");
                     // Add record update with new signer
                     let mut new_signers = signers;
                     new_signers.push(_sender);
@@ -135,7 +149,7 @@ decl_module! {
         /// eligible blockchain that has an established two-way peg with Edgeware. This
         /// function should only be called by a token holder interested in transferring
         /// native Edgeware tokens with Edgeware-compliant, non-native tokens like ERC20.
-        pub fn withdraw(origin, quantity: T::Balance) -> Result {
+        pub fn withdraw(origin, quantity: T::Balance, signed_cross_chain_tx: Vec<u8>) -> Result {
             let _sender = ensure_signed(origin)?;
 
             let mut nonce = Self::withdraw_nonce_of(_sender.clone());
@@ -151,7 +165,7 @@ decl_module! {
                     // If sender is a bridge authority add them to the set of signers
                     let mut signers = vec![];
                     if <Authorities<T>>::get().iter().any(|a| a == &_sender) {
-                        signers.push(_sender.clone());
+                        signers.push((_sender.clone(), signed_cross_chain_tx));
                     }
 
                     // Ensure sender has enough balance to withdraw from
@@ -170,10 +184,10 @@ decl_module! {
 
         /// The sign_withdraw function should compile signatures (from send tx) and
         /// check if a withdraw proposal ever passes with each new valid signer.
-        pub fn sign_withdraw(origin, target: T::AccountId, record_hash: T::Hash, quantity: T::Balance) -> Result {
+        pub fn sign_withdraw(origin, target: T::AccountId, record_hash: T::Hash, quantity: T::Balance, signed_cross_chain_tx: Vec<u8>) -> Result {
             let _sender = ensure_signed(origin)?;
 
-            match <DepositOf<T>>::get(record_hash) {
+            match <WithdrawOf<T>>::get(record_hash) {
                 Some((inx, tgt, qty, signers)) => {
                     // Ensure all parameters match for safety
                     ensure!(tgt == target.clone(), "Accounts do not match");
@@ -181,15 +195,15 @@ decl_module! {
                     // Ensure sender is a bridge authority if record exists
                     ensure!(Self::authorities().iter().any(|id| id == &_sender), "Invalid non-authority sender");
                     // Ensure senders can't sign twice
-                    ensure!(!signers.iter().any(|id| id == &_sender), "Invalid duplicate deposit signings");
+                    ensure!(!signers.iter().any(|s| s.0 == _sender), "Invalid duplicate deposit signings");
                     // Add record update with new signer
                     let mut new_signers = signers;
-                    new_signers.push(_sender);
+                    new_signers.push((_sender, signed_cross_chain_tx));
                     <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone()));
 
                     // Check if we have reached enough signers for the deposit
                     let stake_sum = new_signers.iter()
-                        .map(|s| <AuthorityStake<T>>::get(s))
+                        .map(|s| <AuthorityStake<T>>::get(s.clone().0))
                         .fold(Zero::zero(), |a,b| a + b);
 
                     // Check if we approve the proposal
@@ -211,15 +225,57 @@ decl_module! {
     }
 }
 
+// impl<T: Trait> Module<T> {
+//     /// Set the current set of bridge authorities' session keys.
+//     ///
+//     /// Called by `next_session` only in srml_session module.
+//     pub fn set_authorities(authorities: &[T::SessionKey]) {
+//         let current_authorities = AuthorityStorageVec::<T::SessionKey>::items();
+//         if current_authorities != authorities {
+//             Self::save_original_authorities(Some(current_authorities));
+//             AuthorityStorageVec::<T::SessionKey>::set_items(authorities);
+//         }
+//     }
+// }
+
+// impl<X, T> session::OnSessionChange<X> for Module<T> where
+//     T: Trait,
+//     T: session::Trait,
+//     <T as session::Trait>::ConvertAccountIdToSessionKey: Convert<
+//         <T as system::Trait>::AccountId,
+//         <T as Trait>::SessionKey,
+//     >,
+// {
+//     fn on_session_change(_: X, _: bool) {
+//         use primitives::traits::Zero;
+
+//         let next_authorities = <session::Module<T>>::validators()
+//             .into_iter()
+//             .map(T::ConvertAccountIdToSessionKey::convert)
+//             .map(|key| (key, 1)) // evenly-weighted.
+//             .collect::<Vec<(<T as Trait>::SessionKey, u64)>>();
+
+//         // instant changes
+//         let last_authorities = <Authorities<T>>::get();
+//         if next_authorities != last_authorities {
+//             <Authorities<T>>::put(next_authorities);
+//         }
+//     }
+// }
+
 /// An event in this module.
 decl_event!(
     pub enum Event<T> where <T as system::Trait>::Hash,
                             <T as system::Trait>::AccountId,
-                            <T as balances::Trait>::Balance {
+                            <T as balances::Trait>::Balance,
+                            // <T as session::Trait>::SessionKey
+                            {
         // Deposit event for an account, an eligible blockchain transaction hash, and quantity
         Deposit(AccountId, Hash, Balance),
         // Withdraw event for an account, and an amount
         Withdraw(AccountId, Balance),
+        // /// New authority set has been applied.
+        // NewAuthorities(Vec<(SessionKey, u64)>),
     }
 );
 
@@ -253,7 +309,7 @@ decl_storage! {
         /// on Edgeware with the user's account, quantity, and nonce
         pub Withdraws get(withdraws): Vec<T::Hash>;
         /// Mapping of withdraw record hashes to the record
-        pub WithdrawOf get(withdraw_of): map T::Hash => Option<(WithdrawIndex, T::AccountId, T::Balance, Vec<T::AccountId>)>;
+        pub WithdrawOf get(withdraw_of): map T::Hash => Option<(WithdrawIndex, T::AccountId, T::Balance, Vec<(T::AccountId, Vec<u8>)>)>;
         /// Nonce for creating unique hashes per user per withdraw request
         pub WithdrawNonceOf get(withdraw_nonce_of): map T::AccountId => u32;
     }
