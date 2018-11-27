@@ -36,38 +36,38 @@ extern crate srml_balances as balances;
 extern crate srml_system as system;
 extern crate srml_democracy as democracy;
 extern crate srml_session as session;
+extern crate srml_timestamp as timestamp;
+extern crate srml_consensus as consensus;
 
 use democracy::{Approved, VoteThreshold};
 
 use rstd::prelude::*;
 use system::ensure_signed;
-use runtime_support::{StorageValue, StorageMap};
+use runtime_support::{StorageValue, StorageMap, Parameter};
 use runtime_support::dispatch::Result;
 use runtime_support::storage::unhashed::StorageVec;
 use primitives::storage::well_known_keys;
-use runtime_primitives::traits::{Zero, Hash};
-
-use primitives::traits::{ProvideInherent};
+use runtime_primitives::traits::{Zero, Hash, Convert, MaybeSerializeDebug};
 
 /// Record indices.
 pub type DepositIndex = u32;
 pub type WithdrawIndex = u32;
 
-// struct AuthorityStorageVec<S: codec::Codec + Default>(rstd::marker::PhantomData<S>);
-// impl<S: codec::Codec + Default> StorageVec for AuthorityStorageVec<S> {
-//     type Item = S;
-//     const PREFIX: &'static [u8] = well_known_keys::AUTHORITY_PREFIX;
-// }
+struct AuthorityStorageVec<S: codec::Codec + Default>(rstd::marker::PhantomData<S>);
+impl<S: codec::Codec + Default> StorageVec for AuthorityStorageVec<S> {
+    type Item = S;
+    const PREFIX: &'static [u8] = well_known_keys::AUTHORITY_PREFIX;
+}
 
-// pub trait OnOfflineBridgeAuthority {
-//     fn on_offline_authority(authority_index: usize);
-// }
+pub trait OnOfflineBridgeAuthority {
+    fn on_offline_authority(authority_index: usize);
+}
 
-// impl OnOfflineBridgeAuthority for () {
-//     fn on_offline_authority(_authority_index: usize) {}
-// }
+impl OnOfflineBridgeAuthority for () {
+    fn on_offline_authority(_authority_index: usize) {}
+}
 
-pub trait Trait: balances::Trait {
+pub trait Trait: balances::Trait + session::Trait {
     /// The overarching event type.
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
@@ -225,57 +225,54 @@ decl_module! {
     }
 }
 
-// impl<T: Trait> Module<T> {
-//     /// Set the current set of bridge authorities' session keys.
-//     ///
-//     /// Called by `next_session` only in srml_session module.
-//     pub fn set_authorities(authorities: &[T::SessionKey]) {
-//         let current_authorities = AuthorityStorageVec::<T::SessionKey>::items();
-//         if current_authorities != authorities {
-//             Self::save_original_authorities(Some(current_authorities));
-//             AuthorityStorageVec::<T::SessionKey>::set_items(authorities);
-//         }
-//     }
-// }
+impl<T: Trait> Module<T> {
+    /// Set the current set of bridge authorities' session keys.
+    ///
+    /// Called by `next_session` only in srml_session module.
+    pub fn set_authorities(authorities: &[T::SessionKey]) {
+        let current_authorities = AuthorityStorageVec::<T::SessionKey>::items();
+        if current_authorities != authorities {
+            Self::save_original_authorities(Some(current_authorities));
+            AuthorityStorageVec::<T::SessionKey>::set_items(authorities);
+        }
+    }
+}
 
-// impl<X, T> session::OnSessionChange<X> for Module<T> where
-//     T: Trait,
-//     T: session::Trait,
-//     <T as session::Trait>::ConvertAccountIdToSessionKey: Convert<
-//         <T as system::Trait>::AccountId,
-//         <T as Trait>::SessionKey,
-//     >,
-// {
-//     fn on_session_change(_: X, _: bool) {
-//         use primitives::traits::Zero;
+impl<X, T> session::OnSessionChange<X> for Module<T> where
+    T: Trait,
+    T: session::Trait,
+    <T as session::Trait>::ConvertAccountIdToSessionKey: Convert<
+        <T as system::Trait>::AccountId,
+        <T as consensus::Trait>::SessionKey,
+    >,
+{
+    fn on_session_change(_: X, _: bool) {
+        let next_authorities = <session::Module<T>>::validators()
+            .into_iter()
+            .map(T::ConvertAccountIdToSessionKey::convert)
+            .map(|key| (key, 1)) // evenly-weighted.
+            .collect::<Vec<(<T as consensus::Trait>::SessionKey, u64)>>();
 
-//         let next_authorities = <session::Module<T>>::validators()
-//             .into_iter()
-//             .map(T::ConvertAccountIdToSessionKey::convert)
-//             .map(|key| (key, 1)) // evenly-weighted.
-//             .collect::<Vec<(<T as Trait>::SessionKey, u64)>>();
-
-//         // instant changes
-//         let last_authorities = <Authorities<T>>::get();
-//         if next_authorities != last_authorities {
-//             <Authorities<T>>::put(next_authorities);
-//         }
-//     }
-// }
+        // instant changes
+        let last_authorities = <Authorities<T>>::get();
+        if next_authorities != last_authorities {
+            <Authorities<T>>::put(next_authorities);
+        }
+    }
+}
 
 /// An event in this module.
 decl_event!(
     pub enum Event<T> where <T as system::Trait>::Hash,
                             <T as system::Trait>::AccountId,
                             <T as balances::Trait>::Balance,
-                            // <T as session::Trait>::SessionKey
-                            {
+                            <T as consensus::Trait>::SessionKey {
         // Deposit event for an account, an eligible blockchain transaction hash, and quantity
         Deposit(AccountId, Hash, Balance),
         // Withdraw event for an account, and an amount
         Withdraw(AccountId, Balance),
-        // /// New authority set has been applied.
-        // NewAuthorities(Vec<(SessionKey, u64)>),
+        /// New authority set has been applied.
+        NewAuthorities(Vec<(SessionKey, u64)>),
     }
 );
 

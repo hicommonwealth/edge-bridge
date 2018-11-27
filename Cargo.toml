@@ -62,11 +62,11 @@ git = "https://github.com/paritytech/substrate/"
 default-features = false
 git = "https://github.com/paritytech/substrate/"
 
-[dependencies.srml-timestamp]
+[dependencies.srml-consensus]
 default-features = false
 git = "https://github.com/paritytech/substrate/"
 
-[dependencies.srml-staking]
+[dependencies.srml-timestamp]
 default-features = false
 git = "https://github.com/paritytech/substrate/"
 
@@ -95,4 +95,6 @@ std = [
     "srml-balances/std",
     "srml-council/std",
     "srml-democracy/std",
+    "srml-timestamp/std",
+    "srml-consensus/std",
 ]

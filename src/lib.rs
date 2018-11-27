@@ -44,8 +44,13 @@ extern crate srml_system as system;
 extern crate srml_balances as balances;
 extern crate srml_democracy as democracy;
 extern crate srml_council as council;
+extern crate srml_session as session;
+extern crate srml_consensus as consensus;
+extern crate srml_timestamp as timestamp;
 
-use council::{voting, motions, seats};
+use consensus::{Log};
+use runtime_primitives::traits::{Identity, BlakeTwo256};
+// use council::{voting, motions, seats};
 
 // use rstd::prelude::*;
 // use runtime_support::dispatch::Result;
@@ -57,18 +62,31 @@ use bridge::{Module, Trait, RawEvent};
 // Tests for Bridge Module
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use consensus::RawLog;
+use super::*;
 
     // use system::{EventRecord, Phase};
     // use runtime_io::with_externalities;
     // use runtime_io::ed25519::Pair;
-    use primitives::{H256, Blake2Hasher, Hasher};
+    use primitives::{H256, Blake2Hasher};
     // The testing primitives are very useful for avoiding having to work with signatures
     // or public keys. `u64` is used as the `AccountId` and no `Signature`s are requried.
     use runtime_primitives::{
-        BuildStorage, traits::{BlakeTwo256}, testing::{Digest, DigestItem, Header}
+        BuildStorage, traits::{Convert, BlakeTwo256}, testing::{Digest, DigestItem, Header}
     };
 
+    /// Alias to Ed25519 pubkey that identifies an account on the chain. This will almost
+    /// certainly continue to be the same as the substrate's `AuthorityId`.
+    pub type AccountId = H256;
+    pub type SessionKey = primitives::AuthorityId;
+
+    /// Session key conversion.
+    pub struct SessionKeyConversion;
+    impl Convert<AccountId, SessionKey> for SessionKeyConversion {
+        fn convert(a: AccountId) -> SessionKey {
+            a.to_fixed_bytes().into()
+        }
+    }
 
     impl_outer_origin! {
         pub enum Origin for Test {
@@ -80,6 +98,7 @@ mod tests {
         pub enum Event for Test {
             bridge<T>,
             balances<T>,
+            session<T>,
             // democracy<T>,
             // council<T>,
             // voting<T>,
@@ -90,6 +109,8 @@ mod tests {
     impl_outer_dispatch! {
         pub enum Call for Test where origin: Origin {
             balances::Balances,
+            session::Session,
+            consensus::Consensus,
             // democracy::Democracy,
         }
     }
@@ -105,8 +126,8 @@ mod tests {
         type BlockNumber = u64;
         type Hash = H256;
         type Hashing = BlakeTwo256;
-        type Digest = Digest;
-        type AccountId = u64;
+        type Digest = generic::Digest<Log>;
+        type AccountId = AccountId;
         type Header = Header;
         type Event = Event;
         type Log = DigestItem;
@@ -118,34 +139,33 @@ mod tests {
         type EnsureAccountLiquid = ();
         type Event = Event;
     }
-    
-    // impl democracy::Trait for Test {
-    //     type Proposal = Call;
-    //     type Event = Event;
-    // }
-    // impl council::Trait for Test {
-    //     type Event = Event;
-    // }
-    // impl voting::Trait for Test {
-    //     type Event = Event;
-    // }
-    // impl motions::Trait for Test {
-    //     type Origin = Origin;
-    //     type Proposal = Call;
-    //     type Event = Event;
-    // }
+
+    impl timestamp::Trait for Test {
+        const TIMESTAMP_SET_POSITION: u32 = 0;
+        type Moment = u64;
+    }
+
+    impl session::Trait for Test {
+        type ConvertAccountIdToSessionKey = SessionKeyConversion;
+        type OnSessionChange = ();
+        type Event = Event;
+    }
+
+    impl consensus::Trait for Test {
+        const NOTE_OFFLINE_POSITION: u32 = 1;
+        type Log = Log;
+        type SessionKey = SessionKey;
+        type OnOfflineValidator = ();
+    }
 
     impl Trait for Test {
-            type Event = Event;
+        type Event = Event;
     }
 
     pub type System = system::Module<Test>;
     pub type Balances = balances::Module<Test>;
-    // pub type Democracy = democracy::Module<Test>;
-    // pub type Council = seats::Module<Test>;
-    // pub type CouncilVoting = voting::Module<Test>;
-    // pub type CouncilMotions = motions::Module<Test>;
-    pub type Staking = staking::Module<Test>;
+    pub type Consensus = consensus::Module<Test>;
+    pub type Session = session::Module<Test>;
     pub type Bridge = Module<Test>;
 
     // This function basically just builds a genesis storage key/value store according to
