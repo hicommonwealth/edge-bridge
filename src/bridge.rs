@@ -35,31 +35,23 @@ extern crate sr_io as runtime_io;
 extern crate srml_balances as balances;
 extern crate srml_system as system;
 extern crate srml_session as session;
-extern crate srml_grandpa as grandpa;
 
-use primitives::AuthorityId;
-use grandpa::fg_primitives::ScheduledChange;
 use democracy::{Approved, VoteThreshold};
 
 use rstd::prelude::*;
 use system::ensure_signed;
 use runtime_support::{StorageValue, StorageMap, Parameter};
 use runtime_support::dispatch::Result;
-use runtime_support::storage::unhashed::StorageVec;
-use primitives::storage::well_known_keys;
 use runtime_primitives::traits::{Zero, Hash, Convert, MaybeSerializeDebug};
 
 /// Record indices.
 pub type DepositIndex = u32;
 pub type WithdrawIndex = u32;
 
-/// The log type of this crate, projected from module trait type.
-pub type Log<T> = grandpa::RawLog<
-    <T as system::Trait>::BlockNumber,
-    <T as grandpa::Trait>::SessionKey,
->;
-
-pub trait Trait: balances::Trait + grandpa::Trait {
+pub trait Trait: balances::Trait + session::Trait {
+    /// The session key type used by authorities.
+    #[cfg(feature = "std")]
+    type SessionKey: Parameter + Default + MaybeSerializeDebug;
     /// The overarching event type.
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
@@ -231,20 +223,12 @@ impl<T> Default for SyncedAuthorities<T> {
     }
 }
 
-impl<X, T> session::OnSessionChange<X> for SyncedAuthorities<T> where
-    T: Trait,
-    T: session::Trait,
-    <T as session::Trait>::ConvertAccountIdToSessionKey: Convert<
-        <T as system::Trait>::AccountId,
-        <T as grandpa::Trait>::SessionKey,
-    >,
-{
+impl<X, T> session::OnSessionChange<X> for SyncedAuthorities<T> where T: Trait, T: session::Trait {
     fn on_session_change(_: X, _: bool) {
         let next_authorities = <session::Module<T>>::validators()
             .into_iter()
-            .map(T::ConvertAccountIdToSessionKey::convert)
             .map(|key| (key, 1)) // evenly-weighted.
-            .collect::<Vec<(<T as grandpa::Trait>::SessionKey, u64)>>();
+            .collect::<Vec<(T::AccountId, u64)>>();
 
         // instant changes
         let last_authorities = <Authorities<T>>::get();
@@ -258,14 +242,13 @@ impl<X, T> session::OnSessionChange<X> for SyncedAuthorities<T> where
 decl_event!(
     pub enum Event<T> where <T as system::Trait>::Hash,
                             <T as system::Trait>::AccountId,
-                            <T as balances::Trait>::Balance,
-                            <T as grandpa::Trait>::SessionKey {
+                            <T as balances::Trait>::Balance {
         // Deposit event for an account, an eligible blockchain transaction hash, and quantity
         Deposit(AccountId, Hash, Balance),
         // Withdraw event for an account, and an amount
         Withdraw(AccountId, Balance),
         /// New authority set has been applied.
-        NewAuthorities(Vec<(SessionKey, u64)>),
+        NewAuthorities(Vec<(AccountId, u64)>),
     }
 );
 
@@ -302,52 +285,5 @@ decl_storage! {
         pub WithdrawOf get(withdraw_of): map T::Hash => Option<(WithdrawIndex, T::AccountId, T::Balance, Vec<(T::AccountId, Vec<u8>)>)>;
         /// Nonce for creating unique hashes per user per withdraw request
         pub WithdrawNonceOf get(withdraw_nonce_of): map T::AccountId => u32;
-    }
-}
-
-/// A logs in this module.
-#[cfg_attr(feature = "std", derive(Serialize, Debug))]
-#[derive(Encode, Decode, PartialEq, Eq, Clone)]
-pub enum RawLog<N, SessionKey> {
-    /// Authorities set change has been signalled. Contains the new set of authorities
-    /// and the delay in blocks before applying.
-    AuthoritiesChangeSignal(N, Vec<(SessionKey, u64)>),
-}
-
-impl<N: Clone, SessionKey> RawLog<N, SessionKey> {
-    /// Try to cast the log entry as a contained signal.
-    pub fn as_signal(&self) -> Option<(N, &[(SessionKey, u64)])> {
-        match *self {
-            RawLog::AuthoritiesChangeSignal(ref n, ref signal) => Some((n.clone(), signal)),
-        }
-    }
-}
-
-/// Logs which can be scanned by GRANDPA for authorities change events.
-pub trait BridgeChangeSignal<N> {
-    /// Try to cast the log entry as a contained signal.
-    fn as_signal(&self) -> Option<ScheduledChange<N>>;
-}
-
-impl<N, SessionKey> BridgeChangeSignal<N> for RawLog<N, SessionKey>
-    where N: Clone, SessionKey: Clone + Into<AuthorityId>,
-{
-    fn as_signal(&self) -> Option<ScheduledChange<N>> {
-        RawLog::as_signal(self).map(|(delay, next_authorities)| ScheduledChange {
-            delay,
-            next_authorities: next_authorities.iter()
-                .cloned()
-                .map(|(k, w)| (k.into(), w))
-                .collect(),
-        })
-    }
-}
-
-impl<T: Trait> Module<T> where AuthorityId: core::convert::From<<T as grandpa::Trait>::SessionKey> {
-    /// See if the digest contains any scheduled change.
-    pub fn scrape_digest_change(log: &Log<T>)
-        -> Option<ScheduledChange<T::BlockNumber>>
-    {
-        <Log<T> as BridgeChangeSignal<T::BlockNumber>>::as_signal(log)
     }
 }

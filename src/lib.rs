@@ -42,8 +42,10 @@ extern crate sr_io as runtime_io;
 
 extern crate srml_system as system;
 extern crate srml_balances as balances;
-extern crate srml_grandpa as grandpa;
+extern crate srml_session as session;
+extern crate srml_timestamp as timestamp;
 extern crate srml_democracy as democracy;
+extern crate srml_consensus as consensus;
 
 // use council::{voting, motions, seats};
 
@@ -58,19 +60,10 @@ use bridge::{Module, Trait, RawEvent};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grandpa::RawLog;
     use primitives::{H256, Blake2Hasher};
-
     use runtime_primitives::{BuildStorage};
-    use runtime_primitives::traits::{BlakeTwo256};
+    use runtime_primitives::traits::{BlakeTwo256, Identity};
     use runtime_primitives::testing::{Digest, DigestItem, Header};
-    use runtime_primitives::generic::DigestItem as GenDigestItem;
-
-    impl From<RawLog<u64, u64>> for DigestItem {
-        fn from(log: RawLog<u64, u64>) -> DigestItem {
-            GenDigestItem::Other(log.encode())
-        }
-    }
 
     impl_outer_origin! {
         pub enum Origin for Test {}
@@ -80,14 +73,14 @@ mod tests {
         pub enum Event for Test {
             bridge<T>,
             balances<T>,
-            grandpa<T>,
+            session<T>,
         }
     }
 
     impl_outer_dispatch! {
         pub enum Call for Test where origin: Origin {
             balances::Balances,
-            grandpa::Grandpa,
+            session::Session,
         }
     }
 
@@ -115,18 +108,30 @@ mod tests {
         type EnsureAccountLiquid = ();
         type Event = Event;
     }
-    impl grandpa::Trait for Test {
+    impl consensus::Trait for Test {
+        const NOTE_OFFLINE_POSITION: u32 = 1;
         type Log = DigestItem;
         type SessionKey = u64;
+        type OnOfflineValidator = ();
+    }
+    impl timestamp::Trait for Test {
+        const TIMESTAMP_SET_POSITION: u32 = 0;
+        type Moment = u64;
+    }
+    impl session::Trait for Test {
+        type ConvertAccountIdToSessionKey = Identity;
+        type OnSessionChange = Bridge;
         type Event = Event;
     }
     impl Trait for Test {
+        type SessionKey = u64;
         type Event = Event;
     }
 
     pub type System = system::Module<Test>;
     pub type Balances = balances::Module<Test>;
-    pub type Grandpa = grandpa::Module<Test>;
+    pub type Session = session::Module<Test>;
+    pub type Consensus = consensus::Module<Test>;
     pub type Bridge = Module<Test>;
 
     // This function basically just builds a genesis storage key/value store according to
