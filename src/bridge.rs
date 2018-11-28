@@ -276,7 +276,7 @@ decl_storage! {
         pub BlockHeaders get(block_headers): map T::Hash => Vec<T::Hash>;
 
         /// The active set of bridge authorities who can sign off on requests
-        pub Authorities get(authorities): Vec<T::AccountId>;
+        pub Authorities get(authorities) config(): Vec<T::AccountId>;
         /// Mappings of stake per active authority
         pub AuthorityStake get(authority_stake): map T::AccountId => T::Balance;
         /// Total stake managed by the bridge authorities

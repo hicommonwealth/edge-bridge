@@ -58,6 +58,7 @@ use bridge::{Module, Trait, RawEvent};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grandpa::RawLog;
     use primitives::{H256, Blake2Hasher};
 
     use runtime_primitives::{BuildStorage};
