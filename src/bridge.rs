@@ -34,11 +34,11 @@ extern crate sr_io as runtime_io;
 
 extern crate srml_balances as balances;
 extern crate srml_system as system;
-extern crate srml_democracy as democracy;
 extern crate srml_session as session;
-extern crate srml_timestamp as timestamp;
-extern crate srml_consensus as consensus;
+extern crate srml_grandpa as grandpa;
 
+use primitives::AuthorityId;
+use grandpa::fg_primitives::ScheduledChange;
 use democracy::{Approved, VoteThreshold};
 
 use rstd::prelude::*;
@@ -53,21 +53,13 @@ use runtime_primitives::traits::{Zero, Hash, Convert, MaybeSerializeDebug};
 pub type DepositIndex = u32;
 pub type WithdrawIndex = u32;
 
-struct AuthorityStorageVec<S: codec::Codec + Default>(rstd::marker::PhantomData<S>);
-impl<S: codec::Codec + Default> StorageVec for AuthorityStorageVec<S> {
-    type Item = S;
-    const PREFIX: &'static [u8] = well_known_keys::AUTHORITY_PREFIX;
-}
+/// The log type of this crate, projected from module trait type.
+pub type Log<T> = grandpa::RawLog<
+    <T as system::Trait>::BlockNumber,
+    <T as grandpa::Trait>::SessionKey,
+>;
 
-pub trait OnOfflineBridgeAuthority {
-    fn on_offline_authority(authority_index: usize);
-}
-
-impl OnOfflineBridgeAuthority for () {
-    fn on_offline_authority(_authority_index: usize) {}
-}
-
-pub trait Trait: balances::Trait + session::Trait {
+pub trait Trait: balances::Trait + grandpa::Trait {
     /// The overarching event type.
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
@@ -225,25 +217,26 @@ decl_module! {
     }
 }
 
-impl<T: Trait> Module<T> {
-    /// Set the current set of bridge authorities' session keys.
-    ///
-    /// Called by `next_session` only in srml_session module.
-    pub fn set_authorities(authorities: &[T::SessionKey]) {
-        let current_authorities = AuthorityStorageVec::<T::SessionKey>::items();
-        if current_authorities != authorities {
-            Self::save_original_authorities(Some(current_authorities));
-            AuthorityStorageVec::<T::SessionKey>::set_items(authorities);
-        }
+/// Helper for authorities being synchronized with the general session authorities.
+///
+/// This is not the only way to manage an authority set for GRANDPA, but it is
+/// a convenient one. When this is used, no other mechanism for altering authority
+/// sets should be.
+pub struct SyncedAuthorities<T>(::rstd::marker::PhantomData<T>);
+
+// TODO: remove when https://github.com/rust-lang/rust/issues/26925 is fixed
+impl<T> Default for SyncedAuthorities<T> {
+    fn default() -> Self {
+        SyncedAuthorities(::rstd::marker::PhantomData)
     }
 }
 
-impl<X, T> session::OnSessionChange<X> for Module<T> where
+impl<X, T> session::OnSessionChange<X> for SyncedAuthorities<T> where
     T: Trait,
     T: session::Trait,
     <T as session::Trait>::ConvertAccountIdToSessionKey: Convert<
         <T as system::Trait>::AccountId,
-        <T as consensus::Trait>::SessionKey,
+        <T as grandpa::Trait>::SessionKey,
     >,
 {
     fn on_session_change(_: X, _: bool) {
@@ -251,7 +244,7 @@ impl<X, T> session::OnSessionChange<X> for Module<T> where
             .into_iter()
             .map(T::ConvertAccountIdToSessionKey::convert)
             .map(|key| (key, 1)) // evenly-weighted.
-            .collect::<Vec<(<T as consensus::Trait>::SessionKey, u64)>>();
+            .collect::<Vec<(<T as grandpa::Trait>::SessionKey, u64)>>();
 
         // instant changes
         let last_authorities = <Authorities<T>>::get();
@@ -266,7 +259,7 @@ decl_event!(
     pub enum Event<T> where <T as system::Trait>::Hash,
                             <T as system::Trait>::AccountId,
                             <T as balances::Trait>::Balance,
-                            <T as consensus::Trait>::SessionKey {
+                            <T as grandpa::Trait>::SessionKey {
         // Deposit event for an account, an eligible blockchain transaction hash, and quantity
         Deposit(AccountId, Hash, Balance),
         // Withdraw event for an account, and an amount
@@ -309,5 +302,52 @@ decl_storage! {
         pub WithdrawOf get(withdraw_of): map T::Hash => Option<(WithdrawIndex, T::AccountId, T::Balance, Vec<(T::AccountId, Vec<u8>)>)>;
         /// Nonce for creating unique hashes per user per withdraw request
         pub WithdrawNonceOf get(withdraw_nonce_of): map T::AccountId => u32;
+    }
+}
+
+/// A logs in this module.
+#[cfg_attr(feature = "std", derive(Serialize, Debug))]
+#[derive(Encode, Decode, PartialEq, Eq, Clone)]
+pub enum RawLog<N, SessionKey> {
+    /// Authorities set change has been signalled. Contains the new set of authorities
+    /// and the delay in blocks before applying.
+    AuthoritiesChangeSignal(N, Vec<(SessionKey, u64)>),
+}
+
+impl<N: Clone, SessionKey> RawLog<N, SessionKey> {
+    /// Try to cast the log entry as a contained signal.
+    pub fn as_signal(&self) -> Option<(N, &[(SessionKey, u64)])> {
+        match *self {
+            RawLog::AuthoritiesChangeSignal(ref n, ref signal) => Some((n.clone(), signal)),
+        }
+    }
+}
+
+/// Logs which can be scanned by GRANDPA for authorities change events.
+pub trait BridgeChangeSignal<N> {
+    /// Try to cast the log entry as a contained signal.
+    fn as_signal(&self) -> Option<ScheduledChange<N>>;
+}
+
+impl<N, SessionKey> BridgeChangeSignal<N> for RawLog<N, SessionKey>
+    where N: Clone, SessionKey: Clone + Into<AuthorityId>,
+{
+    fn as_signal(&self) -> Option<ScheduledChange<N>> {
+        RawLog::as_signal(self).map(|(delay, next_authorities)| ScheduledChange {
+            delay,
+            next_authorities: next_authorities.iter()
+                .cloned()
+                .map(|(k, w)| (k.into(), w))
+                .collect(),
+        })
+    }
+}
+
+impl<T: Trait> Module<T> where AuthorityId: core::convert::From<<T as grandpa::Trait>::SessionKey> {
+    /// See if the digest contains any scheduled change.
+    pub fn scrape_digest_change(log: &Log<T>)
+        -> Option<ScheduledChange<T::BlockNumber>>
+    {
+        <Log<T> as BridgeChangeSignal<T::BlockNumber>>::as_signal(log)
     }
 }

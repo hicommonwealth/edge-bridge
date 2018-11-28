@@ -1,82 +1,26 @@
 [package]
-authors = ["Drew Stone <drew@commonwealth.im>"]
-name = "edge_bridge"
+name = "edge_identity"
 version = "0.1.0"
+authors = ["Drew Stone <drew@commonwealth.im>"]
 
 [dependencies]
-hex-literal = "0.1.1"
-
-[dependencies.parity-codec]
-default-features = false
-version = "2.1.5"
-
-[dependencies.parity-codec-derive]
-default-features = false
-version = "2.1.0"
-
-[dependencies.safe-mix]
-default-features = false
-version = "1.0.0"
-
-[dependencies.serde]
-default-features = false
-version = "1.0.80"
-
-[dependencies.serde_derive]
-optional = true
-version = "1.0.80"
-
-[dependencies.sr-io]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.sr-primitives]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.sr-std]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-balances]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-council]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-democracy]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-session]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-support]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-system]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-consensus]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.srml-timestamp]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
-
-[dependencies.substrate-keyring]
-git = "https://github.com/paritytech/substrate/"
-optional = true
-
-[dependencies.substrate-primitives]
-default-features = false
-git = "https://github.com/paritytech/substrate/"
+hex-literal = "0.1.0"
+serde = { version = "1.0", default-features = false }
+serde_derive = { version = "1.0", optional = true }
+safe-mix = { version = "1.0", default-features = false}
+parity-codec = { version = "2.1", default-features = false }
+parity-codec-derive = { version = "2.1", default-features = false }
+substrate-keyring = { git = "https://github.com/paritytech/substrate/", optional = true }
+substrate-primitives = { git = "https://github.com/paritytech/substrate/", default-features = false }
+sr-std = { git = "https://github.com/paritytech/substrate/", default-features = false }
+sr-io = { git = "https://github.com/paritytech/substrate/", default-features = false }
+sr-primitives = { git = "https://github.com/paritytech/substrate/", default-features = false }
+srml-support = { git = "https://github.com/paritytech/substrate/", default-features = false }
+srml-system = { git = "https://github.com/paritytech/substrate/", default-features = false }
+srml-balances = { git = "https://github.com/paritytech/substrate/", default-features = false }
+srml-grandpa = { git = "https://github.com/paritytech/substrate/", default-features = false }
+srml-session = { git = "https://github.com/paritytech/substrate/", default-features = false }
+srml-democracy = { git = "https://github.com/paritytech/substrate/", default-features = false }
 
 [features]
 default = ["std"]
@@ -93,8 +37,7 @@ std = [
     "sr-primitives/std",
     "srml-system/std",
     "srml-balances/std",
-    "srml-council/std",
+    "srml-grandpa/std",
+    "srml-session/std",
     "srml-democracy/std",
-    "srml-timestamp/std",
-    "srml-consensus/std",
 ]
