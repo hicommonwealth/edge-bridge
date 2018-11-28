@@ -209,26 +209,11 @@ decl_module! {
     }
 }
 
-/// Helper for authorities being synchronized with the general session authorities.
-///
-/// This is not the only way to manage an authority set for GRANDPA, but it is
-/// a convenient one. When this is used, no other mechanism for altering authority
-/// sets should be.
-pub struct SyncedAuthorities<T>(::rstd::marker::PhantomData<T>);
-
-// TODO: remove when https://github.com/rust-lang/rust/issues/26925 is fixed
-impl<T> Default for SyncedAuthorities<T> {
-    fn default() -> Self {
-        SyncedAuthorities(::rstd::marker::PhantomData)
-    }
-}
-
-impl<X, T> session::OnSessionChange<X> for SyncedAuthorities<T> where T: Trait, T: session::Trait {
+impl<X, T> session::OnSessionChange<X> for Module<T> where T: Trait, T: session::Trait {
     fn on_session_change(_: X, _: bool) {
         let next_authorities = <session::Module<T>>::validators()
             .into_iter()
-            .map(|key| (key, 1)) // evenly-weighted.
-            .collect::<Vec<(T::AccountId, u64)>>();
+            .collect::<Vec<T::AccountId>>();
 
         // instant changes
         let last_authorities = <Authorities<T>>::get();
