@@ -112,8 +112,9 @@ decl_module! {
                     <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone()));
 
                     // Check if we have reached enough signers for the deposit
+                    // TODO: Ensure that checking balances is sufficient vs. finding explicit stake amounts
                     let stake_sum = new_signers.iter()
-                        .map(|s| <AuthorityStake<T>>::get(s))
+                        .map(|s| <balances::Module<T>>::total_balance(s))
                         .fold(Zero::zero(), |a,b| a + b);
 
                     // Check if we approve the proposal
@@ -185,9 +186,10 @@ decl_module! {
                     new_signers.push((_sender, signed_cross_chain_tx));
                     <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone()));
 
-                    // Check if we have reached enough signers for the deposit
+                    // Check if we have reached enough signers for the withdrawal
+                    // TODO: Ensure that checking balances is sufficient vs. finding explicit stake amounts
                     let stake_sum = new_signers.iter()
-                        .map(|s| <AuthorityStake<T>>::get(s.clone().0))
+                        .map(|s| <balances::Module<T>>::total_balance(&s.0))
                         .fold(Zero::zero(), |a,b| a + b);
 
                     // Check if we approve the proposal
@@ -245,12 +247,6 @@ decl_storage! {
 
         /// The active set of bridge authorities who can sign off on requests
         pub Authorities get(authorities) config(): Vec<T::AccountId>;
-        /// Mappings of stake per active authority
-        pub AuthorityStake get(authority_stake): map T::AccountId => T::Balance;
-        /// Total stake managed by the bridge authorities
-        pub TotalAuthorityStake get(total_authority_stake): T::Balance;
-        /// The required stake threshold for executing requests represented as an integer [0,100]
-        pub StakeThreshold get(stake_threshold) config(): T::Balance;
 
         /// Number of deposits
         pub DepositCount get(deposit_count): u32;

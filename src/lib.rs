@@ -141,7 +141,6 @@ mod tests {
         // // We use default for brevity, but you can configure as desired if needed.
         t.extend(bridge::GenesisConfig::<Test>{
             authorities: vec![1, 2, 3],
-            stake_threshold: 67,
             _genesis_phantom_data: Default::default(),
         }.build_storage().unwrap().0);
         t.into()
