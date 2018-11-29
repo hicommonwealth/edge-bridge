@@ -40,18 +40,15 @@ use democracy::{Approved, VoteThreshold};
 
 use rstd::prelude::*;
 use system::ensure_signed;
-use runtime_support::{StorageValue, StorageMap, Parameter};
+use runtime_support::{StorageValue, StorageMap};
 use runtime_support::dispatch::Result;
-use runtime_primitives::traits::{Zero, Hash, Convert, MaybeSerializeDebug};
+use runtime_primitives::traits::{Zero, Hash};
 
 /// Record indices.
 pub type DepositIndex = u32;
 pub type WithdrawIndex = u32;
 
 pub trait Trait: balances::Trait + session::Trait {
-    /// The session key type used by authorities.
-    #[cfg(feature = "std")]
-    type SessionKey: Parameter + Default + MaybeSerializeDebug;
     /// The overarching event type.
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }

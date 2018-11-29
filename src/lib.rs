@@ -22,12 +22,12 @@ extern crate serde;
 // Needed for deriving `Serialize` and `Deserialize` for various types.
 // We only implement the serde traits for std builds - they're unneeded
 // in the wasm runtime.
-#[cfg(feature = "std")]
-#[macro_use]
-extern crate serde_derive;
-#[cfg(test)]
-#[macro_use]
-extern crate hex_literal;
+// #[cfg(feature = "std")]
+// #[macro_use]
+// extern crate serde_derive;
+// #[cfg(test)]
+// #[macro_use]
+// extern crate hex_literal;
 #[macro_use] extern crate parity_codec_derive;
 #[macro_use] extern crate srml_support;
 
@@ -49,8 +49,8 @@ extern crate srml_consensus as consensus;
 
 // use council::{voting, motions, seats};
 
-// use rstd::prelude::*;
-// use runtime_support::dispatch::Result;
+use rstd::prelude::*;
+use runtime_support::dispatch::Result;
 // use primitives::ed25519;
 
 pub mod bridge;
@@ -60,6 +60,8 @@ use bridge::{Module, Trait, RawEvent};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runtime_io::with_externalities;
+    use system::{EventRecord, Phase};
     use primitives::{H256, Blake2Hasher};
     use runtime_primitives::{BuildStorage};
     use runtime_primitives::traits::{BlakeTwo256, Identity};
@@ -124,14 +126,12 @@ mod tests {
         type Event = Event;
     }
     impl Trait for Test {
-        type SessionKey = u64;
         type Event = Event;
     }
 
     pub type System = system::Module<Test>;
     pub type Balances = balances::Module<Test>;
     pub type Session = session::Module<Test>;
-    pub type Consensus = consensus::Module<Test>;
     pub type Bridge = Module<Test>;
 
     // This function basically just builds a genesis storage key/value store according to
@@ -139,10 +139,50 @@ mod tests {
     fn new_test_ext() -> sr_io::TestExternalities<Blake2Hasher> {
         let mut t = system::GenesisConfig::<Test>::default().build_storage().unwrap().0;
         // // We use default for brevity, but you can configure as desired if needed.
+        t.extend(balances::GenesisConfig::<Test>{
+            balances: [(1, 10000), (2, 10000), (3, 10000), (4, 100), (5, 100), (6, 100)].to_vec(),
+            transaction_base_fee: 0,
+            transaction_byte_fee: 0,
+            existential_deposit: 0,
+            transfer_fee: 0,
+            creation_fee: 0,
+            reclaim_rebate: 0,
+            _genesis_phantom_data: Default::default(),
+        }.build_storage().unwrap().0);
         t.extend(bridge::GenesisConfig::<Test>{
             authorities: vec![1, 2, 3],
             _genesis_phantom_data: Default::default(),
         }.build_storage().unwrap().0);
         t.into()
+    }
+
+    fn deposit(who: u64, target: u64, transaction_hash: H256, quantity: u64) -> super::Result {
+        Bridge::deposit(Origin::signed(who), target, transaction_hash, quantity)
+    }
+
+    fn sign_deposit(who: u64, target: u64, transaction_hash: H256, quantity: u64) -> super::Result {
+        Bridge::sign_deposit(Origin::signed(who), target, transaction_hash, quantity)
+    }
+
+    fn withdraw(who: u64, quantity: u64, signed_cross_chain_tx: Vec<u8>) -> super::Result {
+        Bridge::withdraw(Origin::signed(who), quantity, signed_cross_chain_tx)
+    }
+
+    fn sign_withdraw(who: u64, target: u64, record_hash: H256, quantity: u64, signed_cross_chain_tx: Vec<u8>) -> super::Result {
+        Bridge::sign_withdraw(Origin::signed(who), target, record_hash, quantity, signed_cross_chain_tx)
+    }
+
+    #[test]
+    fn params_should_be_set_correctly() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            assert_eq!(Balances::total_balance(&1), 10000);
+            assert_eq!(Balances::total_balance(&2), 10000);
+            assert_eq!(Balances::total_balance(&3), 10000);
+            assert_eq!(Balances::total_balance(&4), 100);
+            assert_eq!(Balances::total_balance(&5), 100);
+            assert_eq!(Balances::total_balance(&6), 100);
+            assert_eq!(Bridge::authorities(), vec![1, 2, 3]);
+        });
     }
 }
