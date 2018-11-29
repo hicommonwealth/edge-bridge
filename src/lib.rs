@@ -62,7 +62,7 @@ mod tests {
     use super::*;
     use runtime_io::with_externalities;
     use system::{EventRecord, Phase};
-    use primitives::{H256, Blake2Hasher};
+    use primitives::{H256, Blake2Hasher, Hasher};
     use runtime_primitives::{BuildStorage};
     use runtime_primitives::traits::{BlakeTwo256, Identity};
     use runtime_primitives::testing::{Digest, DigestItem, Header};
@@ -183,6 +183,58 @@ mod tests {
             assert_eq!(Balances::total_balance(&5), 100);
             assert_eq!(Balances::total_balance(&6), 100);
             assert_eq!(Bridge::authorities(), vec![1, 2, 3]);
+        });
+    }
+
+    #[test]
+    fn deposit_as_a_function_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            assert_ok!(deposit(5, 5, hash, 10));
+            assert_eq!(System::events(), vec![
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::bridge(RawEvent::Deposit(5, hash, 10)),
+                }]
+            );
+        });
+    }
+
+    #[test]
+    fn deposit_with_same_tx_twice_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            assert_ok!(deposit(5, 5, hash, 10));
+            assert_eq!(deposit(5, 5, hash, 10), Err("Deposit should not exist"));
+        });
+    }
+
+
+
+    #[test]
+    fn withdraw_as_a_function_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let signed_tx = b"a sends money to b on Ethereum";
+            assert_ok!(withdraw(5, 10, signed_tx.to_vec()));
+            assert_eq!(System::events(), vec![
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::bridge(RawEvent::Withdraw(5, 10)),
+                }]
+            );
+        });
+    }
+
+    #[test]
+    fn withdraw_with_not_enough_balance_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let signed_tx = b"a sends money to b on Ethereum";
+            assert_eq!(Balances::total_balance(&4), 100);
+            assert_eq!(withdraw(4, 101,signed_tx.to_vec()), Err("Invalid balance for withdraw"));
         });
     }
 }

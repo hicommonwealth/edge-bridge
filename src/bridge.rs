@@ -70,19 +70,19 @@ decl_module! {
             match <DepositOf<T>>::get(transaction_hash) {
                 Some(_) => { return Err("Deposit should not exist")},
                 None => {
-                    // Create new deposit record
-                    let index = Self::deposit_count();
-                    <DepositCount<T>>::mutate(|i| *i += 1);
-
                     // If sender is a bridge authority add them to the set of signers
                     let mut signers = vec![];
                     if <Authorities<T>>::get().iter().any(|a| a == &_sender) {
                         signers.push(_sender);
                     }
 
+                    // Create new deposit record
+                    let index = Self::deposit_count();
+                    <DepositCount<T>>::mutate(|i| *i += 1);
+
                     // Deposit record and send event
-                    <DepositOf<T>>::insert(transaction_hash, (index, target, quantity, signers))
-                    // TODO: Fire event
+                    <DepositOf<T>>::insert(transaction_hash, (index, target.clone(), quantity, signers));
+                    Self::deposit_event(RawEvent::Deposit(target, transaction_hash, quantity));
                 },
             }
 
@@ -140,10 +140,6 @@ decl_module! {
             match <WithdrawOf<T>>::get(key) {
                 Some(_) => { return Err("Withdraw already exists")},
                 None => {
-                    // Create new withdraw record
-                    let index = Self::withdraw_count();
-                    <WithdrawCount<T>>::mutate(|i| *i += 1);
-
                     // If sender is a bridge authority add them to the set of signers
                     let mut signers = vec![];
                     if <Authorities<T>>::get().iter().any(|a| a == &_sender) {
@@ -153,9 +149,13 @@ decl_module! {
                     // Ensure sender has enough balance to withdraw from
                     ensure!(<balances::Module<T>>::total_balance(&_sender) >= quantity, "Invalid balance for withdraw");
 
+                    // Create new withdraw record
+                    let index = Self::withdraw_count();
+                    <WithdrawCount<T>>::mutate(|i| *i += 1);
+
                     // Withdraw record and send event
                     <WithdrawOf<T>>::insert(key, (index, _sender.clone(), quantity, signers));
-                    // TODO: Fire event
+                    Self::deposit_event(RawEvent::Withdraw(_sender.clone(), quantity));
                 },
             }
 
@@ -217,7 +217,8 @@ impl<X, T> session::OnSessionChange<X> for Module<T> where T: Trait, T: session:
         // instant changes
         let last_authorities = <Authorities<T>>::get();
         if next_authorities != last_authorities {
-            <Authorities<T>>::put(next_authorities);
+            <Authorities<T>>::put(next_authorities.clone());
+            Self::deposit_event(RawEvent::NewAuthorities(next_authorities));
         }
     }
 }
@@ -232,7 +233,7 @@ decl_event!(
         // Withdraw event for an account, and an amount
         Withdraw(AccountId, Balance),
         /// New authority set has been applied.
-        NewAuthorities(Vec<(AccountId, u64)>),
+        NewAuthorities(Vec<AccountId>),
     }
 );
 
