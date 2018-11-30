@@ -49,7 +49,6 @@ extern crate srml_consensus as consensus;
 
 // use council::{voting, motions, seats};
 
-use rstd::prelude::*;
 use runtime_support::dispatch::Result;
 // use primitives::ed25519;
 
@@ -164,12 +163,12 @@ mod tests {
         Bridge::sign_deposit(Origin::signed(who), target, transaction_hash, quantity)
     }
 
-    fn withdraw(who: u64, quantity: u64, signed_cross_chain_tx: Vec<u8>) -> super::Result {
-        Bridge::withdraw(Origin::signed(who), quantity, signed_cross_chain_tx)
+    fn withdraw(who: u64, quantity: u64, signed_cross_chain_tx: &[u8]) -> super::Result {
+        Bridge::withdraw(Origin::signed(who), quantity, signed_cross_chain_tx.to_vec())
     }
 
-    fn sign_withdraw(who: u64, target: u64, record_hash: H256, quantity: u64, signed_cross_chain_tx: Vec<u8>) -> super::Result {
-        Bridge::sign_withdraw(Origin::signed(who), target, record_hash, quantity, signed_cross_chain_tx)
+    fn sign_withdraw(who: u64, target: u64, record_hash: H256, quantity: u64, signed_cross_chain_tx: &[u8]) -> super::Result {
+        Bridge::sign_withdraw(Origin::signed(who), target, record_hash, quantity, signed_cross_chain_tx.to_vec())
     }
 
     #[test]
@@ -206,19 +205,98 @@ mod tests {
         with_externalities(&mut new_test_ext(), || {
             System::set_block_number(1);
             let hash = Blake2Hasher::hash(b"a sends money to b");
-            assert_ok!(deposit(5, 5, hash, 10));
-            assert_eq!(deposit(5, 5, hash, 10), Err("Deposit should not exist"));
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_eq!(deposit(5, 5, hash, quantity), Err("Deposit should not exist"));
         });
     }
 
+    #[test]
+    fn sign_deposit_as_bridge_authority_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_ok!(sign_deposit(1, 5, hash, quantity));
+        });
+    }
 
+    // FIXME: This works but I'm confused why it's a supermajority
+    #[test]
+    fn sign_deposit_supermajority_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_eq!(Balances::total_balance(&5), 100);
+            assert_ok!(sign_deposit(1, 5, hash, quantity));
+            assert_eq!(Balances::total_balance(&5), 110);
+        });
+    }
+
+    #[test]
+    fn sign_non_existent_deposit_as_bridge_authority_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_eq!(sign_deposit(1, 5, hash, quantity), Err("Invalid transaction hash"));
+        });
+    }
+
+    #[test]
+    fn sign_deposit_with_wrong_quantity_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_eq!(sign_deposit(1, 5, hash, quantity - 1), Err("Quantities don't match"));
+        });
+    }
+
+    #[test]
+    fn sign_deposit_with_wrong_target_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_eq!(sign_deposit(1, 4, hash, quantity), Err("Accounts do not match"));
+        });
+    }
+
+    #[test]
+    fn sign_deposit_as_non_authority_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_eq!(sign_deposit(5, 5, hash, quantity), Err("Invalid non-authority sender"));
+        });
+    }
+
+    #[test]
+    fn sign_deposit_twice_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_ok!(sign_deposit(1, 5, hash, quantity));
+            assert_eq!(sign_deposit(1, 5, hash, quantity), Err("Invalid duplicate signings"))
+        });
+    }
 
     #[test]
     fn withdraw_as_a_function_should_work() {
         with_externalities(&mut new_test_ext(), || {
             System::set_block_number(1);
             let signed_tx = b"a sends money to b on Ethereum";
-            assert_ok!(withdraw(5, 10, signed_tx.to_vec()));
+            assert_ok!(withdraw(5, 10, signed_tx));
             assert_eq!(System::events(), vec![
                 EventRecord {
                     phase: Phase::ApplyExtrinsic(0),
@@ -234,7 +312,81 @@ mod tests {
             System::set_block_number(1);
             let signed_tx = b"a sends money to b on Ethereum";
             assert_eq!(Balances::total_balance(&4), 100);
-            assert_eq!(withdraw(4, 101,signed_tx.to_vec()), Err("Invalid balance for withdraw"));
+            assert_eq!(withdraw(4, 101, signed_tx), Err("Invalid balance for withdraw"));
+        });
+    }
+
+    #[test]
+    fn sign_withdraw_supermajority_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let cross_chain_proof = b"a sent b 1 ETH";
+            let quantity = 10;
+            assert_ok!(withdraw(5, quantity, cross_chain_proof));
+            assert_eq!(Balances::total_balance(&5), 100);
+            let hash = Bridge::withdraw_record_hash(0);
+            assert_ok!(sign_withdraw(1, 5, hash, quantity, cross_chain_proof));
+            assert_eq!(Balances::total_balance(&5), 100 - quantity);
+        });
+    }
+
+    #[test]
+    fn sign_withdraw_with_wrong_quantity_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let cross_chain_proof = b"a sent b 1 ETH";
+            let quantity = 10;
+            assert_ok!(withdraw(5, quantity, cross_chain_proof));
+            let hash = Bridge::withdraw_record_hash(0);
+            assert_eq!(sign_withdraw(1, 5, hash, quantity - 1, cross_chain_proof), Err("Quantities don't match"));
+        });
+    }
+
+    #[test]
+    fn sign_withdraw_with_wrong_target_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let cross_chain_proof = b"a sent b 1 ETH";
+            let quantity = 10;
+            assert_ok!(withdraw(5, quantity, cross_chain_proof));
+            let hash = Bridge::withdraw_record_hash(0);
+            assert_eq!(sign_withdraw(1, 4, hash, quantity, cross_chain_proof), Err("Accounts do not match"));
+        });
+    }
+
+    #[test]
+    fn sign_withdraw_as_non_authority_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let cross_chain_proof = b"a sent b 1 ETH";
+            let quantity = 10;
+            assert_ok!(withdraw(5, quantity, cross_chain_proof));
+            let hash = Bridge::withdraw_record_hash(0);
+            assert_eq!(sign_withdraw(5, 5, hash, quantity, cross_chain_proof), Err("Invalid non-authority sender"));
+        });
+    }
+
+    #[test]
+    fn sign_withdraw_twice_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let cross_chain_proof = b"a sent b 1 ETH";
+            let quantity = 10;
+            assert_ok!(withdraw(5, quantity, cross_chain_proof));
+            let hash = Bridge::withdraw_record_hash(0);
+            assert_ok!(sign_withdraw(1, 5, hash, quantity, cross_chain_proof));
+            assert_eq!(sign_withdraw(1, 5, hash, quantity, cross_chain_proof), Err("Invalid duplicate signings"))
+        });
+    }
+
+    #[test]
+    fn sign_withdraw_with_non_existent_record_hash_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let cross_chain_proof = b"a sent b 1 ETH";
+            let quantity = 10;
+            let hash = Blake2Hasher::hash(b"drew stone was here");
+            assert_eq!(sign_withdraw(1, 4, hash, quantity, cross_chain_proof), Err("Invalid record hash"));
         });
     }
 }

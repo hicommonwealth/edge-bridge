@@ -77,10 +77,13 @@ decl_module! {
                     }
 
                     // Create new deposit record
+                    let mut deposits = <Deposits<T>>::get();
+                    deposits.push(transaction_hash);
+                    <Deposits<T>>::put(deposits);
+
+                    // Insert deposit record and send event
                     let index = Self::deposit_count();
                     <DepositCount<T>>::mutate(|i| *i += 1);
-
-                    // Deposit record and send event
                     <DepositOf<T>>::insert(transaction_hash, (index, target.clone(), quantity, signers));
                     Self::deposit_event(RawEvent::Deposit(target, transaction_hash, quantity));
                 },
@@ -104,8 +107,8 @@ decl_module! {
                     // Ensure senders can't sign twice
                     ensure!(!signers.iter().any(|id| id == &_sender), "Invalid duplicate signings");
                     // Add record update with new signer
-                    let mut new_signers = signers;
-                    new_signers.push(_sender);
+                    let mut new_signers = signers.clone();
+                    new_signers.push(_sender.clone());
                     <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone()));
 
                     // Check if we have reached enough signers for the deposit
@@ -150,10 +153,13 @@ decl_module! {
                     ensure!(<balances::Module<T>>::total_balance(&_sender) >= quantity, "Invalid balance for withdraw");
 
                     // Create new withdraw record
+                    let mut withdraws = <Withdraws<T>>::get();
+                    withdraws.push(key);
+                    <Withdraws<T>>::put(withdraws);
+
+                    // Insert withdraw record and send event
                     let index = Self::withdraw_count();
                     <WithdrawCount<T>>::mutate(|i| *i += 1);
-
-                    // Withdraw record and send event
                     <WithdrawOf<T>>::insert(key, (index, _sender.clone(), quantity, signers));
                     Self::deposit_event(RawEvent::Withdraw(_sender.clone(), quantity));
                 },
@@ -177,7 +183,7 @@ decl_module! {
                     // Ensure sender is a bridge authority if record exists
                     ensure!(Self::authorities().iter().any(|id| id == &_sender), "Invalid non-authority sender");
                     // Ensure senders can't sign twice
-                    ensure!(!signers.iter().any(|s| s.0 == _sender), "Invalid duplicate deposit signings");
+                    ensure!(!signers.iter().any(|s| s.0 == _sender), "Invalid duplicate signings");
                     // Add record update with new signer
                     let mut new_signers = signers;
                     new_signers.push((_sender, signed_cross_chain_tx));
@@ -200,11 +206,17 @@ decl_module! {
                         };
                     }
                 },
-                None => { return Err("Invalid transaction hash") },
+                None => { return Err("Invalid record hash") },
             }
 
             Ok(())
         }
+    }
+}
+
+impl<T: Trait> Module<T> {
+    pub fn withdraw_record_hash(index: usize) -> T::Hash {
+        return <Withdraws<T>>::get()[index];
     }
 }
 
