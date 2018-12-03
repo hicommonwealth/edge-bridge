@@ -84,7 +84,7 @@ decl_module! {
                     // Insert deposit record and send event
                     let index = Self::deposit_count();
                     <DepositCount<T>>::mutate(|i| *i += 1);
-                    <DepositOf<T>>::insert(transaction_hash, (index, target.clone(), quantity, signers));
+                    <DepositOf<T>>::insert(transaction_hash, (index, target.clone(), quantity, signers, false));
                     Self::deposit_event(RawEvent::Deposit(target, transaction_hash, quantity));
                 },
             }
@@ -98,10 +98,11 @@ decl_module! {
             let _sender = ensure_signed(origin)?;
 
             match <DepositOf<T>>::get(transaction_hash) {
-                Some((inx, tgt, qty, signers)) => {
+                Some((inx, tgt, qty, signers, completed)) => {
                     // Ensure all parameters match for safety
                     ensure!(tgt == target.clone(), "Accounts do not match");
                     ensure!(qty == quantity, "Quantities don't match");
+                    ensure!(!completed, "Transaction already completed");
                     // Ensure sender is a bridge authority
                     ensure!(Self::authorities().iter().any(|id| id == &_sender), "Invalid non-authority sender");
                     // Ensure senders can't sign twice
@@ -109,7 +110,6 @@ decl_module! {
                     // Add record update with new signer
                     let mut new_signers = signers.clone();
                     new_signers.push(_sender.clone());
-                    <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone()));
 
                     // Check if we have reached enough signers for the deposit
                     // TODO: Ensure that checking balances is sufficient vs. finding explicit stake amounts
@@ -117,10 +117,14 @@ decl_module! {
                         .map(|s| <balances::Module<T>>::total_balance(s))
                         .fold(Zero::zero(), |a,b| a + b);
 
-                    // Check if we approve the proposal
+                    // Check if we approve the proposal, if so, mark approved
                     let total_issuance = <balances::Module<T>>::total_issuance();
-                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, Zero::zero(), total_issuance) {
+                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance) {
                         <balances::Module<T>>::increase_free_balance_creating(&tgt, qty);
+                        <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone(), true));
+                        // TODO: fire event
+                    } else {
+                        <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone(), false));
                     }
                 },
                 None => { return Err("Invalid transaction hash") },
@@ -160,7 +164,7 @@ decl_module! {
                     // Insert withdraw record and send event
                     let index = Self::withdraw_count();
                     <WithdrawCount<T>>::mutate(|i| *i += 1);
-                    <WithdrawOf<T>>::insert(key, (index, _sender.clone(), quantity, signers));
+                    <WithdrawOf<T>>::insert(key, (index, _sender.clone(), quantity, signers, false));
                     Self::deposit_event(RawEvent::Withdraw(_sender.clone(), quantity));
                 },
             }
@@ -176,10 +180,11 @@ decl_module! {
             let _sender = ensure_signed(origin)?;
 
             match <WithdrawOf<T>>::get(record_hash) {
-                Some((inx, tgt, qty, signers)) => {
+                Some((inx, tgt, qty, signers, completed)) => {
                     // Ensure all parameters match for safety
                     ensure!(tgt == target.clone(), "Accounts do not match");
                     ensure!(qty == quantity, "Quantities don't match");
+                    ensure!(!completed, "Transaction already completed");
                     // Ensure sender is a bridge authority if record exists
                     ensure!(Self::authorities().iter().any(|id| id == &_sender), "Invalid non-authority sender");
                     // Ensure senders can't sign twice
@@ -187,7 +192,6 @@ decl_module! {
                     // Add record update with new signer
                     let mut new_signers = signers;
                     new_signers.push((_sender, signed_cross_chain_tx));
-                    <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone()));
 
                     // Check if we have reached enough signers for the withdrawal
                     // TODO: Ensure that checking balances is sufficient vs. finding explicit stake amounts
@@ -197,13 +201,17 @@ decl_module! {
 
                     // Check if we approve the proposal
                     let total_issuance = <balances::Module<T>>::total_issuance();
-                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, Zero::zero(), total_issuance) {
+                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance) {
                         match <balances::Module<T>>::decrease_free_balance(&tgt, qty) {
                             Ok(_) => {
+                                // TODO: do we still mark completed on error? or store a "failed" tx?
+                                <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone(), true));
                                 // TODO: fire event
                             },
-                            Err(err) => { return Err(err); }
+                            Err(err) => { return Err(err); } // TODO test this?
                         };
+                    } else {
+                        <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone(), false));
                     }
                 },
                 None => { return Err("Invalid record hash") },
@@ -244,7 +252,7 @@ decl_event!(
         Deposit(AccountId, Hash, Balance),
         // Withdraw event for an account, and an amount
         Withdraw(AccountId, Balance),
-        /// New authority set has been applied.
+        // New authority set has been applied.
         NewAuthorities(Vec<AccountId>),
     }
 );
@@ -265,7 +273,7 @@ decl_storage! {
         pub Deposits get(deposits): Vec<T::Hash>;
         /// Mapping of deposit transaction hashes from the eligible blockchain to the
         /// deposit request record
-        pub DepositOf get(deposit_of): map T::Hash => Option<(DepositIndex, T::AccountId, T::Balance, Vec<T::AccountId>)>;
+        pub DepositOf get(deposit_of): map T::Hash => Option<(DepositIndex, T::AccountId, T::Balance, Vec<T::AccountId>, bool)>;
         
         /// Number of withdraws
         pub WithdrawCount get(withdraw_count): u32;
@@ -273,7 +281,7 @@ decl_storage! {
         /// on Edgeware with the user's account, quantity, and nonce
         pub Withdraws get(withdraws): Vec<T::Hash>;
         /// Mapping of withdraw record hashes to the record
-        pub WithdrawOf get(withdraw_of): map T::Hash => Option<(WithdrawIndex, T::AccountId, T::Balance, Vec<(T::AccountId, Vec<u8>)>)>;
+        pub WithdrawOf get(withdraw_of): map T::Hash => Option<(WithdrawIndex, T::AccountId, T::Balance, Vec<(T::AccountId, Vec<u8>)>, bool)>;
         /// Nonce for creating unique hashes per user per withdraw request
         pub WithdrawNonceOf get(withdraw_nonce_of): map T::AccountId => u32;
     }
