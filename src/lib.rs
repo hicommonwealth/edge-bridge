@@ -53,7 +53,7 @@ use runtime_support::dispatch::Result;
 // use primitives::ed25519;
 
 pub mod bridge;
-use bridge::{Module, Trait, RawEvent};
+pub use bridge::{Module, Trait, RawEvent, Event};
 
 // Tests for Bridge Module
 #[cfg(test)]
