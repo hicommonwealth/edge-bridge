@@ -222,7 +222,6 @@ mod tests {
         });
     }
 
-    // FIXME: This works but I'm confused why it's a supermajority
     #[test]
     fn sign_deposit_supermajority_should_work() {
         with_externalities(&mut new_test_ext(), || {
@@ -232,10 +231,29 @@ mod tests {
             assert_ok!(deposit(5, 5, hash, quantity));
             assert_eq!(Balances::total_balance(&5), 100);
             assert_ok!(sign_deposit(1, 5, hash, quantity));
+            assert_eq!(Balances::total_balance(&5), 100);
+            assert_ok!(sign_deposit(2, 5, hash, quantity));
             assert_eq!(Balances::total_balance(&5), 110);
         });
     }
 
+    #[test]
+    fn sign_deposit_once_complete_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let hash = Blake2Hasher::hash(b"a sends money to b");
+            let quantity = 10;
+            assert_ok!(deposit(5, 5, hash, quantity));
+            assert_eq!(Balances::total_balance(&5), 100);
+            assert_ok!(sign_deposit(1, 5, hash, quantity));
+            assert_eq!(Balances::total_balance(&5), 100);
+            assert_ok!(sign_deposit(2, 5, hash, quantity));
+            assert_eq!(Balances::total_balance(&5), 110);
+            assert_eq!(sign_deposit(3, 5, hash, quantity),
+                       Err("Transaction already completed"));
+        });
+    }
+    
     #[test]
     fn sign_non_existent_deposit_as_bridge_authority_should_not_work() {
         with_externalities(&mut new_test_ext(), || {
@@ -326,10 +344,30 @@ mod tests {
             assert_eq!(Balances::total_balance(&5), 100);
             let hash = Bridge::withdraw_record_hash(0);
             assert_ok!(sign_withdraw(1, 5, hash, quantity, cross_chain_proof));
+            assert_eq!(Balances::total_balance(&5), 100);
+            assert_ok!(sign_withdraw(2, 5, hash, quantity, cross_chain_proof));
             assert_eq!(Balances::total_balance(&5), 100 - quantity);
         });
     }
 
+    #[test]
+    fn sign_withdraw_once_complete_should_not_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let cross_chain_proof = b"a sent b 1 ETH";
+            let quantity = 10;
+            assert_ok!(withdraw(5, quantity, cross_chain_proof));
+            assert_eq!(Balances::total_balance(&5), 100);
+            let hash = Bridge::withdraw_record_hash(0);
+            assert_ok!(sign_withdraw(1, 5, hash, quantity, cross_chain_proof));
+            assert_eq!(Balances::total_balance(&5), 100);
+            assert_ok!(sign_withdraw(2, 5, hash, quantity, cross_chain_proof));
+            assert_eq!(Balances::total_balance(&5), 100 - quantity);
+            assert_eq!(sign_withdraw(3, 5, hash, quantity, cross_chain_proof),
+                       Err("Transaction already completed"))
+        });
+    }
+    
     #[test]
     fn sign_withdraw_with_wrong_quantity_should_not_work() {
         with_externalities(&mut new_test_ext(), || {
