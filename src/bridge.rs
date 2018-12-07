@@ -257,7 +257,7 @@ decl_event!(
 );
 
 decl_storage! {
-    trait Store for Module<T: Trait> as IdentityStorage {
+    trait Store for Module<T: Trait> as BridgeStorage {
         /// Mapping from an eligible blockchain by Hash(name) to the list of block headers
         /// TODO: V2 feature when we have stronger proofs of transfers
         pub BlockHeaders get(block_headers): map T::Hash => Vec<T::Hash>;
