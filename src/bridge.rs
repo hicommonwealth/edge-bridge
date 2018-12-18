@@ -118,7 +118,7 @@ decl_module! {
 
                     // Check if we approve the proposal, if so, mark approved
                     let total_issuance = <balances::Module<T>>::total_issuance();
-                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance) {
+                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance, total_issuance) {
                         <balances::Module<T>>::increase_free_balance_creating(&tgt, qty);
                         <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone(), true));
                         // TODO: fire event
@@ -200,7 +200,7 @@ decl_module! {
 
                     // Check if we approve the proposal
                     let total_issuance = <balances::Module<T>>::total_issuance();
-                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance) {
+                    if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance, total_issuance) {
                         match <balances::Module<T>>::decrease_free_balance(&tgt, qty) {
                             Ok(_) => {
                                 // TODO: do we still mark completed on error? or store a "failed" tx?
