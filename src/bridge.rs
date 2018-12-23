@@ -64,7 +64,7 @@ decl_module! {
         /// sees the transaction first.
         pub fn deposit(origin, target: T::AccountId, transaction_hash: T::Hash, quantity: T::Balance) -> Result {
             let _sender = ensure_signed(origin)?;
-            
+
             // Match on deposit records by the respective transaction hash on the eligible blockchain
             match <DepositOf<T>>::get(transaction_hash) {
                 Some(_) => { return Err("Deposit should not exist")},
@@ -114,14 +114,14 @@ decl_module! {
                     // TODO: Ensure that checking balances is sufficient vs. finding explicit stake amounts
                     let stake_sum = new_signers.iter()
                         .map(|s| <balances::Module<T>>::total_balance(s))
-                        .fold(Zero::zero(), |a,b| a + b);
+                        .fold(Zero::zero(), |a, b| a + b);
 
                     // Check if we approve the proposal, if so, mark approved
                     let total_issuance = <balances::Module<T>>::total_issuance();
                     if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance, total_issuance) {
                         <balances::Module<T>>::increase_free_balance_creating(&tgt, qty);
                         <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone(), true));
-                        // TODO: fire event
+                        Self::deposit_event(RawEvent::Approved(inx, tgt.clone(), qty, new_signers.clone()))
                     } else {
                         <DepositOf<T>>::insert(transaction_hash, (inx, tgt.clone(), qty, new_signers.clone(), false));
                     }
@@ -190,7 +190,7 @@ decl_module! {
                     ensure!(!signers.iter().any(|s| s.0 == _sender), "Invalid duplicate signings");
                     // Add record update with new signer
                     let mut new_signers = signers;
-                    new_signers.push((_sender, signed_cross_chain_tx));
+                    new_signers.push((_sender.clone(), signed_cross_chain_tx));
 
                     // Check if we have reached enough signers for the withdrawal
                     // TODO: Ensure that checking balances is sufficient vs. finding explicit stake amounts
@@ -201,14 +201,10 @@ decl_module! {
                     // Check if we approve the proposal
                     let total_issuance = <balances::Module<T>>::total_issuance();
                     if VoteThreshold::SuperMajorityApprove.approved(stake_sum, total_issuance - stake_sum, total_issuance, total_issuance) {
-                        match <balances::Module<T>>::decrease_free_balance(&tgt, qty) {
-                            Ok(_) => {
-                                // TODO: do we still mark completed on error? or store a "failed" tx?
-                                <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone(), true));
-                                // TODO: fire event
-                            },
-                            Err(err) => { return Err(err); } // TODO test this?
-                        };
+                        <balances::Module<T>>::decrease_free_balance(&tgt, qty)?;
+                        // TODO: do we still mark completed on error? or store a "failed" tx?
+                        <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone(), true));
+                        Self::deposit_event(RawEvent::WithdrawSigned(_sender, target, record_hash, quantity));
                     } else {
                         <WithdrawOf<T>>::insert(record_hash, (inx, tgt.clone(), qty, new_signers.clone(), false));
                     }
@@ -227,7 +223,11 @@ impl<T: Trait> Module<T> {
     }
 }
 
-impl<X, T> session::OnSessionChange<X> for Module<T> where T: Trait, T: session::Trait {
+impl<X, T> session::OnSessionChange<X> for Module<T>
+where
+    T: Trait,
+    T: session::Trait,
+{
     fn on_session_change(_: X, _: bool) {
         let next_authorities = <session::Module<T>>::validators()
             .into_iter()
@@ -242,17 +242,22 @@ impl<X, T> session::OnSessionChange<X> for Module<T> where T: Trait, T: session:
     }
 }
 
+
 /// An event in this module.
 decl_event!(
     pub enum Event<T> where <T as system::Trait>::Hash,
                             <T as system::Trait>::AccountId,
                             <T as balances::Trait>::Balance {
-        // Deposit event for an account, an eligible blockchain transaction hash, and quantity
+        /// Deposit event for an account, an eligible blockchain transaction hash, and quantity
         Deposit(AccountId, Hash, Balance),
-        // Withdraw event for an account, and an amount
+        /// Withdraw event for an account, and an amount
         Withdraw(AccountId, Balance),
-        // New authority set has been applied.
+        /// New authority set has been applied.
         NewAuthorities(Vec<AccountId>),
+        /// Approved
+        Approved(u32, AccountId, Balance, Vec<AccountId>),
+        /// Withdrawl signed
+        WithdrawSigned(AccountId, AccountId, Hash, Balance),
     }
 );
 
@@ -273,7 +278,7 @@ decl_storage! {
         /// Mapping of deposit transaction hashes from the eligible blockchain to the
         /// deposit request record
         pub DepositOf get(deposit_of): map T::Hash => Option<(DepositIndex, T::AccountId, T::Balance, Vec<T::AccountId>, bool)>;
-        
+
         /// Number of withdraws
         pub WithdrawCount get(withdraw_count): u32;
         /// List of all withdraw requests on Edgeware taken to be the unique hash created
