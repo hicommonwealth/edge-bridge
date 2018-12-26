@@ -114,7 +114,13 @@ decl_module! {
                     // TODO: Ensure that checking balances is sufficient vs. finding explicit stake amounts
                     let stake_sum = new_signers.iter()
                         .map(|s| <balances::Module<T>>::total_balance(s))
-                        .fold(Zero::zero(), |a, b| a + b);
+                        .fold(Zero::zero(), |a, b| {
+                            let res = a + b;
+                            if res < a || res < b || res - b != a {
+                                panic!("Integer overflow in balance calculation")
+                            }
+                            res
+                        });
 
                     // Check if we approve the proposal, if so, mark approved
                     let total_issuance = <balances::Module<T>>::total_issuance();

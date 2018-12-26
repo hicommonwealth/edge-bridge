@@ -47,11 +47,6 @@ extern crate srml_timestamp as timestamp;
 extern crate srml_democracy as democracy;
 extern crate srml_consensus as consensus;
 
-// use council::{voting, motions, seats};
-
-use runtime_support::dispatch::Result;
-// use primitives::ed25519;
-
 pub mod bridge;
 pub use bridge::{Module, Trait, RawEvent, Event};
 
@@ -154,19 +149,19 @@ mod tests {
         t.into()
     }
 
-    fn deposit(who: u64, target: u64, transaction_hash: H256, quantity: u64) -> super::Result {
+    fn deposit(who: u64, target: u64, transaction_hash: H256, quantity: u64) -> runtime_support::dispatch::Result {
         Bridge::deposit(Origin::signed(who), target, transaction_hash, quantity)
     }
 
-    fn sign_deposit(who: u64, target: u64, transaction_hash: H256, quantity: u64) -> super::Result {
+    fn sign_deposit(who: u64, target: u64, transaction_hash: H256, quantity: u64) -> runtime_support::dispatch::Result {
         Bridge::sign_deposit(Origin::signed(who), target, transaction_hash, quantity)
     }
 
-    fn withdraw(who: u64, quantity: u64, signed_cross_chain_tx: &[u8]) -> super::Result {
+    fn withdraw(who: u64, quantity: u64, signed_cross_chain_tx: &[u8]) -> runtime_support::dispatch::Result {
         Bridge::withdraw(Origin::signed(who), quantity, signed_cross_chain_tx.to_vec())
     }
 
-    fn sign_withdraw(who: u64, target: u64, record_hash: H256, quantity: u64, signed_cross_chain_tx: &[u8]) -> super::Result {
+    fn sign_withdraw(who: u64, target: u64, record_hash: H256, quantity: u64, signed_cross_chain_tx: &[u8]) -> runtime_support::dispatch::Result {
         Bridge::sign_withdraw(Origin::signed(who), target, record_hash, quantity, signed_cross_chain_tx.to_vec())
     }
 

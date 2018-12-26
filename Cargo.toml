@@ -43,3 +43,6 @@ std = [
     "srml-timestamp/std",
     "srml-democracy/std",
 ]
+
+[profile.release]
+debug-assertions = true
